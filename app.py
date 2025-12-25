@@ -90,3 +90,8 @@ def fetch():
         return jsonify(error="Invalid or missing url"), 400
 
     try:
+try:
+    # 原来 try 下面该干的事
+    r.raise_for_status()
+except Exception:
+    return jsonify({"error": "Failed to fetch url"}), 502
