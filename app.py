@@ -90,7 +90,30 @@ def fetch():
         return jsonify(error="Invalid or missing url"), 400
 
     try:
-       # 原来 try 下面该干的事
-       r.raise_for_status()
-except Exception:
-    return jsonify({"error": "Failed to fetch url"}), 502
+        # 先把网页抓下来
+        r = requests.get(
+            url,
+            timeout=15,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; WebTextExtractor/1.0)"}
+        )
+        r.raise_for_status()
+        html = r.text
+    except Exception as e:
+        return jsonify(error="Failed to fetch url", detail=str(e)), 502
+
+    # 下面是你原来的解析逻辑（你可以先用最简单的，保证能跑起来）
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+
+    title = (soup.title.get_text(strip=True) if soup.title else "")
+    text = soup.get_text("\n", strip=True)
+
+    # 简单裁剪，避免太长
+    text = re.sub(r"\n{3,}", "\n\n", text)[:20000]
+
+    return jsonify(
+        title=title,
+        text=text,
+        source_url=url
+    )
