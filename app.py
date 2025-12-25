@@ -89,17 +89,13 @@ def fetch():
     if not url or not (url.startswith("http://") or url.startswith("https://")):
         return jsonify(error="Invalid or missing url"), 400
 
-    try:
-        # 先把网页抓下来
-        r = requests.get(
-            url,
-            timeout=15,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; WebTextExtractor/1.0)"}
-        )
-        r.raise_for_status()
-        html = r.text
-    except Exception as e:
-        return jsonify(error="Failed to fetch url", detail=str(e)), 502
+   try:
+    r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+    r.raise_for_status()
+    html = r.text
+except Exception as e:
+    return jsonify(error="Failed to fetch url", detail=str(e)), 502
+
 
     # 下面是你原来的解析逻辑（你可以先用最简单的，保证能跑起来）
     soup = BeautifulSoup(html, "html.parser")
