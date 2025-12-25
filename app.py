@@ -18,7 +18,7 @@ def openai_domain_verification():
     )
 
 # =========================
-# MCP Manifest（给 Scan Tools 用）
+# MCP Manifest (Scan Tools 用)
 # =========================
 @app.get("/.well-known/mcp.json")
 def mcp_manifest():
@@ -58,6 +58,7 @@ def mcp_handler():
         if not url:
             return jsonify({"error": "url is required"}), 400
 
+        # 复用 /fetch 逻辑
         with app.test_request_context(f"/fetch?url={url}"):
             return fetch()
 
@@ -79,19 +80,13 @@ def privacy():
     return "No user data is stored."
 
 # =========================
-# 实际抓取网页内容的逻辑
+# 实际网页抓取逻辑
 # =========================
 @app.get("/fetch")
 def fetch():
     url = request.args.get("url", "").strip()
+
     if not url or not (url.startswith("http://") or url.startswith("https://")):
         return jsonify(error="Invalid or missing url"), 400
 
     try:
-        r = requests.get(
-            url,
-            timeout=15,
-            headers={"User-Agent": "Mozilla/5.0"}
-        )
-        r.raise_for_status()
-    except Exception:
