@@ -16,7 +16,14 @@ def privacy():
 @app.get("/health")
 def health():
     return jsonify(ok=True)
+OPENAI_VERIFICATION_TOKEN = "nQZ6GaFoaECuTA1e-6cXnCut_7xfkoEc8f7uY4muiFw"
 
+@app.get("/.well-known/openai-domain-verification.txt")
+def openai_domain_verification():
+    return Response(
+        OPENAI_VERIFICATION_TOKEN,
+        mimetype="text/plain"
+    )
 @app.get("/fetch")
 def fetch():
     url = request.args.get("url", "").strip()
