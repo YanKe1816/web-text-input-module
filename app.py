@@ -1,10 +1,21 @@
 import re
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 
 app = Flask(__name__)
 
+# ===== OpenAI 域名验证 =====
+OPENAI_VERIFICATION_TOKEN = "nQZ6GaFoaECuTA1e-6cXnCut_7xfkoEc8f7uY4muiFw"
+
+@app.get("/.well-known/openai-apps-challenge")
+def openai_domain_verification():
+    return Response(
+        OPENAI_VERIFICATION_TOKEN,
+        mimetype="text/plain"
+    )
+
+# ===== 基础接口 =====
 @app.get("/")
 def home():
     return "Web Page Text Input Module. Use /health or /fetch?url=..."
@@ -16,14 +27,7 @@ def privacy():
 @app.get("/health")
 def health():
     return jsonify(ok=True)
-OPENAI_VERIFICATION_TOKEN = "nQZ6GaFoaECuTA1e-6cXnCut_7xfkoEc8f7uY4muiFw"
 
-@app.get("/.well-known/openai-domain-verification.txt")
-def openai_domain_verification():
-    return Response(
-        OPENAI_VERIFICATION_TOKEN,
-        mimetype="text/plain"
-    )
 @app.get("/fetch")
 def fetch():
     url = request.args.get("url", "").strip()
@@ -31,13 +35,16 @@ def fetch():
         return jsonify(error="Invalid or missing url"), 400
 
     try:
-        r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        r = requests.get(
+            url,
+            timeout=15,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
         r.raise_for_status()
-    except Exception as e:
+    except Exception:
         return jsonify(error="Failed to fetch url"), 502
 
     soup = BeautifulSoup(r.text, "html.parser")
-
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
 
@@ -45,4 +52,8 @@ def fetch():
     text = soup.get_text(" ", strip=True)
     text = re.sub(r"\s+", " ", text)[:8000]
 
-    return jsonify(title=title, text=text, source_url=url)
+    return jsonify(
+        title=title,
+        text=text,
+        source_url=url
+    )
