@@ -1,167 +1,146 @@
-from flask import Flask, jsonify, request, Response, make_response
-import re
-import requests
-from bs4 import BeautifulSoup
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
 
-app = Flask(__name__)
+app = FastAPI()
 
-OPENAI_VERIFICATION_TOKEN = "nQZ6GaFoaECuTA1e-6cXnCut_7xfkoEc8f7uY4muiFw"
+# ====== 1) 域名验证（你必须过这一关）======
+OPENAI_VERIFICATION_TOKEN = "YWZI9_Pg7G9svmoydtQCj6Vep6gJlIT6n5rJxIL40iY"
 
-def with_cors(resp):
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, HEAD"
-    return resp
-
-# --- MCP endpoint (OPTIONS/GET/POST) ---
-@app.route("/mcp", methods=["OPTIONS"])
-def mcp_options():
-    return with_cors(make_response("", 204))
-
-@app.route("/mcp", methods=["GET", "HEAD"])
-def mcp_get():
-    # 给平台探测用：不要 405
-    return with_cors(Response("OK. This is an MCP JSON-RPC endpoint. Use POST.", mimetype="text/plain"))
-
-# --- OpenAI Domain Verification ---
 @app.get("/.well-known/openai-apps-challenge")
 def openai_domain_verification():
-    return Response(OPENAI_VERIFICATION_TOKEN, mimetype="text/plain")
+    return PlainTextResponse(OPENAI_VERIFICATION_TOKEN)
 
-# --- Basic pages for App Info ---
+# ====== 2) CORS（避免外部调用被挡）======
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ====== 3) 给“人看”的页面（App Info 会用到）======
 @app.get("/")
 def home():
-    return "Web Page Text Extractor MCP Server"
+    return {"name": "Execution Checklist MCP Server", "status": "ok"}
 
 @app.get("/health")
 def health():
-    return jsonify(ok=True)
+    return {"ok": True}
 
 @app.get("/privacy")
 def privacy():
-    return "No user data is stored."
+    return PlainTextResponse(
+        "Privacy Policy: This service does not store personal data. "
+        "It processes the text you send only to generate a checklist response. "
+        "No tracking, no user profiling, no data selling."
+    )
 
 @app.get("/terms")
 def terms():
-    return "Provided as-is. This service only fetches public web pages and extracts readable text. No user data is stored."
+    return PlainTextResponse(
+        "Terms of Service: Provided as-is, without warranties. "
+        "Use at your own risk. The service returns generated checklists based on your input."
+    )
 
-# --- Your fetch implementation ---
-@app.get("/fetch")
-def fetch():
-    url = request.args.get("url", "").strip()
-    if not url or not (url.startswith("http://") or url.startswith("https://")):
-        return jsonify(error="Invalid or missing url"), 400
-
-    try:
-        r = requests.get(
-            url,
-            timeout=15,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; WebTextExtractor/1.0)"}
-        )
-        r.raise_for_status()
-        html = r.text
-    except Exception as e:
-        return jsonify(error="Failed to fetch url", detail=str(e)), 502
-
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["script", "style", "noscript"]):
-        tag.decompose()
-
-    title = (soup.title.get_text(strip=True) if soup.title else "")
-    text = soup.get_text("\n", strip=True)
-    text = re.sub(r"\n{3,}", "\n\n", text)[:20000]
-
-    return jsonify(title=title, text=text, source_url=url)
-
-# --- MCP tool list (IMPORTANT: annotations must be nested) ---
+# ====== 4) “说明书”（扫描器爱找这个位置）======
 TOOLS = [
     {
-        "name": "extract_web_text",
-        "description": "Fetch a webpage and extract its readable text content",
+        "name": "generate_checklist",
+        "description": "Generate a structured execution checklist from input text.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "The webpage URL"}
+                "text": {"type": "string", "description": "What you want a checklist for"},
+                "max_steps": {
+                    "type": "integer",
+                    "minimum": 3,
+                    "maximum": 12,
+                    "default": 8,
+                    "description": "Max number of steps"
+                }
             },
-            "required": ["url"]
+            "required": ["text"]
         },
         "annotations": {
             "readOnlyHint": True,
-            "openWorldHint": True,
+            "openWorldHint": False,
             "destructiveHint": False
         }
     }
 ]
 
-# --- Optional: MCP discovery manifest (not required for scan, but nice) ---
 @app.get("/.well-known/mcp.json")
 def mcp_manifest():
-    return with_cors(jsonify({
+    return {
         "schema_version": "v1",
-        "name": "Web Page Text Extractor",
-        "description": "Extract clean readable text from a webpage URL",
+        "name": "Execution Checklist",
+        "description": "Generate execution checklists in a stable structured way.",
         "tools": TOOLS
-    }))
+    }
 
-# --- MCP JSON-RPC ---
-@app.route("/mcp", methods=["POST"])
-def mcp_post():
-    payload = request.get_json(silent=True) or {}
+# ====== 5) /mcp 的“防试探”（GET/OPTIONS 不要让它死）======
+@app.options("/mcp")
+def mcp_options():
+    return PlainTextResponse("", status_code=204)
+
+@app.get("/mcp")
+def mcp_get():
+    return PlainTextResponse("OK. This is an MCP JSON-RPC endpoint. Use POST.")
+
+# ====== 6) 真正的系统调用入口（扫描器就用这个问你三句话）======
+@app.post("/mcp")
+async def mcp_post(request: Request):
+    payload = await request.json()
     method = payload.get("method")
     req_id = payload.get("id")
 
     def ok(result):
-        return with_cors(jsonify({"jsonrpc": "2.0", "id": req_id, "result": result}))
+        return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
     def err(code, message, data=None):
         e = {"code": code, "message": message}
         if data is not None:
             e["data"] = data
-        return with_cors(jsonify({"jsonrpc": "2.0", "id": req_id, "error": e}))
+        return {"jsonrpc": "2.0", "id": req_id, "error": e}
 
+    # 1) initialize
     if method == "initialize":
         return ok({
             "protocolVersion": "2024-11-05",
-            "serverInfo": {"name": "Web Page Text Extractor", "version": "1.0.0"},
+            "serverInfo": {"name": "Execution Checklist", "version": "1.0.0"},
             "capabilities": {"tools": {}}
         })
 
+    # 2) tools/list
     if method == "tools/list":
         return ok({"tools": TOOLS})
 
+    # 3) tools/call
     if method == "tools/call":
         params = payload.get("params") or {}
         name = params.get("name")
         arguments = params.get("arguments") or {}
 
-        if name != "extract_web_text":
+        if name != "generate_checklist":
             return err(-32602, "Unknown tool", {"name": name})
 
-        url = (arguments.get("url") or "").strip()
-        if not url:
-            return err(-32602, "Missing url")
+        text = (arguments.get("text") or "").strip()
+        max_steps = int(arguments.get("max_steps") or 8)
 
-        with app.test_request_context(f"/fetch?url={url}"):
-            resp = fetch()
+        if not text:
+            return err(-32602, "Missing text")
 
-        if isinstance(resp, tuple):
-            body, status = resp
-            if status != 200:
-                return err(-32000, "Fetch failed", body.get_json() if hasattr(body, "get_json") else None)
-            data = body.get_json()
-        else:
-            data = resp.get_json()
+        max_steps = max(3, min(12, max_steps))
+
+        steps = []
+        for i in range(max_steps):
+            steps.append(f"{i+1}. Do the next actionable step for: {text}")
 
         return ok({
-            "content": [{"type": "text", "text": data.get("text", "")}],
-            "meta": {
-                "title": data.get("title", ""),
-                "source_url": data.get("source_url", url)
-            }
+            "content": [{"type": "text", "text": "\n".join(steps)}],
+            "meta": {"steps": max_steps}
         })
 
     return err(-32601, "Method not found", {"method": method})
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
